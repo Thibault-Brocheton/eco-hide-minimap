@@ -1,4 +1,4 @@
-# HideMinimap
+# 🗺️HideMinimap Eco Mod
 
 A small Eco mod that hides or overrides the minimap to create more immersive or roleplay-oriented gameplay.
 
@@ -13,7 +13,7 @@ This prevents players from using the minimap to navigate or scout terrain.
 
 ## Commands (Admin-only)
 
-- /HideMinimap Hide [height] [block]
+- /HideMinimap Hide [height],[block]
 > Enables minimap hiding.
 
 ```
