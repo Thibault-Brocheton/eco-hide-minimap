@@ -1,18 +1,11 @@
-﻿namespace CavRn.HideMinimap
+namespace CavRn.HideMinimap
 {
     using Eco.Core.Plugins.Interfaces;
-    using Eco.Gameplay.Minimap;
     using Eco.Gameplay.Players;
     using Eco.Gameplay.Systems.Messaging.Chat.Commands;
-    using Eco.Shared.Math;
-    using Eco.Shared.Networking;
-    using Eco.Shared.Time;
-    using Eco.Shared.Voxel;
-    using Eco.World;
-    using System.Collections.Concurrent;
+    using Eco.Simulation.WorldLayers;
+    using Eco.Shared.Localization;
     using System.Linq;
-    using System.Reflection;
-    using System;
 
     [ChatCommandHandler]
     public static class HideMinimapCommands
@@ -20,175 +13,88 @@
         [ChatCommand("Shows commands for HideMinimap mod.")]
         public static void HideMinimap(User user) { }
 
-        [ChatSubCommand("HideMinimap", "Restore", ChatAuthorizationLevel.Admin)]
+        [ChatSubCommand("HideMinimap", "Hides the minimap everywhere except in revealed districts. Optional fog height (0-255, -1 = default) and RRGGBB fog color.", ChatAuthorizationLevel.Admin)]
+        public static void Hide(User user, int fogHeight = -1, string fogColor = "")
+        {
+            var config = HideMinimapPlugin.Obj.Config;
+            config.HideMinimap     = true;
+            config.HiddenMapHeight = fogHeight;
+            config.HiddenMapColor  = fogColor.Trim();
+            HideMinimapPlugin.Obj.SaveConfig();
+            MinimapReveal.Activate();
+            user.Player.MsgLocStr($"Minimap hidden, {MinimapReveal.RevealedChunkCount} chunks revealed.");
+        }
+
+        [ChatSubCommand("HideMinimap", "Restores the vanilla minimap everywhere.", ChatAuthorizationLevel.Admin)]
         public static void Restore(User user)
         {
-            if (HideMinimapPlugin.OnTopOrWaterBlockCacheChangedSavedCallbacks.Count == 0)
-            {
-                user.Player.MsgLocStr("No need to restore minimap.");
-                return;
-            }
-
-            HideMinimapPlugin.Obj.Config.HideMinimap = false;
+            var config    = HideMinimapPlugin.Obj.Config;
+            var wasKilled = config.KillMinimap;
+            config.HideMinimap = false;
+            config.KillMinimap = false;
             HideMinimapPlugin.Obj.SaveConfig();
 
-            foreach (var savedUpdate in HideMinimapPlugin.OnTopOrWaterBlockCacheChangedSavedCallbacks)
-            {
-                Eco.World.World.OnTopOrWaterBlockCacheChanged.AddUnique(savedUpdate.Delegate as Action<Vector2i>);
-            }
+            if (wasKilled) MinimapAccess.NetObject.Active = true;
+            if (!MinimapReveal.IsActive && !wasKilled) { user.Player.MsgLocStr("No need to restore minimap."); return; }
 
-            MarkAllChunksDirty();
-
-            HideMinimapPlugin.OnTopOrWaterBlockCacheChangedSavedCallbacks.Clear();
+            MinimapReveal.Deactivate();
+            user.Player.MsgLocStr("Minimap restored.");
         }
 
-        [ChatSubCommand("HideMinimap", "Hide", ChatAuthorizationLevel.Admin)]
-        public static void Hide(User user, int height = 160, string block = "ShaleBlock")
+        [ChatSubCommand("HideMinimap", "Reveals the minimap inside a district: map name, then district name (empty = whole map).", ChatAuthorizationLevel.Admin)]
+        public static void RevealDistrict(User user, string mapName, string districtName = "")
         {
-            var result = Hide(height, block.Trim());
-
-            if (!result.StartsWith("ERROR:"))
-            {
-                HideMinimapPlugin.Obj.Config.HideMinimap = true;
-                HideMinimapPlugin.Obj.SaveConfig();
-            }
-
-            user.Player.MsgLocStr(result);
+            if (!TryValidate(user, mapName, districtName)) return;
+            MinimapReveal.SetDistrictRevealed(mapName, districtName, true);
+            user.Player.MsgLocStr($"Revealed {MinimapReveal.Key(mapName, districtName)} ({MinimapReveal.RevealedChunkCount} chunks visible).");
         }
 
-        public static string Hide(int height = 160, string block = "ShaleBlock")
+        [ChatSubCommand("HideMinimap", "Hides the minimap again inside a district: map name, then district name (empty = whole map).", ChatAuthorizationLevel.Admin)]
+        public static void ConcealDistrict(User user, string mapName, string districtName = "")
         {
-            if (HideMinimapPlugin.OnTopOrWaterBlockCacheChangedSavedCallbacks.Count == 0)
-            {
-                HideMinimapPlugin.OnTopOrWaterBlockCacheChangedSavedCallbacks = Eco.World.World.OnTopOrWaterBlockCacheChanged.Callbacks.ToList();
-                Eco.World.World.OnTopOrWaterBlockCacheChanged.Clear();
-            }
-
-            var field = typeof(MinimapManager).GetField(
-                "data",
-                BindingFlags.Instance | BindingFlags.NonPublic
-            );
-
-            var landData = field?.GetValue(MinimapManager.Obj);
-            if (landData == null)
-            {
-                return "ERROR: Technical issue 1, contact mod creator.";
-            }
-
-            var dataType = landData.GetType();
-            var landHeightsProp  = dataType.GetProperty("LandHeights");
-            var landTypesProp    = dataType.GetProperty("LandTypes");
-            var waterHeightsProp = dataType.GetProperty("WaterHeights");
-
-            var landHeights  = landHeightsProp?.GetValue(landData);
-            var landTypes    = landTypesProp?.GetValue(landData);
-            var waterHeights = waterHeightsProp?.GetValue(landData);
-
-            if (landHeights == null || landTypes == null || waterHeights == null)
-            {
-                return "ERROR: Technical issue 2, contact mod creator.";
-            }
-
-            var chunkMapType = landHeights.GetType();
-            var indexer = chunkMapType.GetProperty("Item", new[] { typeof(Vector2i) });
-            if (indexer == null)
-            {
-                return "ERROR: Technical issue 3, contact mod creator.";
-            }
-
-            if (!block.EndsWith("Block")) block += "Block";
-            var blockType = BlockManager.FromTypeName(block);
-
-            if (blockType == null)
-            {
-                return $"ERROR: Can't find block {block}.";
-            }
-
-            var blockId = BlockManager.GetBlockID(blockType);
-
-            var size = Eco.Shared.Voxel.World.ChunkSize.XZ;
-
-            foreach (var chunkPos in size.XYIter())
-            {
-                var hChunk = indexer?.GetValue(landHeights, new object[] { chunkPos });
-                var tChunk = indexer?.GetValue(landTypes, new object[] { chunkPos });
-
-                ForceUniformChunk(hChunk, (ushort)height);
-                ForceUniformChunk(tChunk, blockId);
-            }
-
-            EnqueueAllChunksToAllViewers();
-
-            return $"Minimap has been set to height {height} with block {block}.";
+            MinimapReveal.SetDistrictRevealed(mapName, districtName, false);
+            user.Player.MsgLocStr($"Concealed {MinimapReveal.Key(mapName, districtName)} ({MinimapReveal.RevealedChunkCount} chunks visible).");
         }
 
-        private static void ForceUniformChunk(object? chunkData, ushort value)
+        [ChatSubCommand("HideMinimap", "Lists revealed districts and active district maps.", ChatAuthorizationLevel.Admin)]
+        public static void ListDistricts(User user)
         {
-            if (chunkData == null) return;
-
-            var chunkType = chunkData.GetType();
-            int size = Chunk.Size;
-
-            // indexeur this[int,int]
-            var indexer = chunkType.GetProperty("Item", new[] { typeof(int), typeof(int) });
-            if (indexer == null) return;
-
-            for (int x = 0; x < size; x++)
-            {
-                for (int y = 0; y < size; y++)
-                {
-                    indexer.SetValue(chunkData, value, new object[] { x, y });
-                }
-            }
-
-            // On laisse la classe faire son boulot
-            var compressMethod = chunkType.GetMethod("Compress", BindingFlags.Instance | BindingFlags.Public);
-            compressMethod?.Invoke(chunkData, null);
-
-            var lastUpdatedProp = chunkType.GetProperty(
-                "LastUpdated",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-            );
-            lastUpdatedProp?.SetValue(chunkData, TimeUtil.Seconds);
+            var revealed = HideMinimapPlugin.Obj.Config.RevealedDistricts;
+            var maps     = MinimapReveal.ActiveMaps.Select(map => $"{map.Name}: {string.Join(", ", map.Districts.Values.Select(d => d.Name))}");
+            user.Player.MsgLocStr($"Hidden: {MinimapReveal.IsActive}\nRevealed: {(revealed.Any() ? string.Join(", ", revealed) : "none")}\nActive maps:\n{string.Join("\n", maps)}");
         }
 
-        private static void EnqueueAllChunksToAllViewers()
+        static bool TryValidate(User user, string mapName, string districtName)
         {
-            var chunkSyncField = typeof(MinimapManager).GetField(
-                "chunkSync",
-                BindingFlags.Static | BindingFlags.NonPublic
-            );
-
-            var dictObj = chunkSyncField?.GetValue(null);
-            if (dictObj == null) return;
-
-            var chunkSync = (ConcurrentDictionary<INetObjectViewer, ConcurrentQueue<Vector2i>>)dictObj;
-
-            var size = Eco.Shared.Voxel.World.ChunkSize.XZ;
-
-            foreach (var kvp in chunkSync)
-            {
-                var queue = kvp.Value;
-                foreach (var chunkPos in size.XYIter())
-                    queue.Enqueue(chunkPos);
-            }
+            var map = MinimapReveal.FindMap(mapName);
+            if (map == null) { user.Player.MsgLocStr($"No active district map named '{mapName}'. Use /HideMinimap ListDistricts."); return false; }
+            if (!string.IsNullOrWhiteSpace(districtName) && MinimapReveal.FindDistrict(map, districtName) == null) { user.Player.MsgLocStr($"No district named '{districtName}' in map '{map.Name}'."); return false; }
+            return true;
         }
 
-        private static void MarkAllChunksDirty()
+        [ChatSubCommand("HideMinimap", "Disables the minimap network object entirely.", ChatAuthorizationLevel.Admin)]
+        public static void KillMap(User user)
         {
-            var changedChunksField = typeof(MinimapManager).GetField(
-                "changedChunks",
-                BindingFlags.Static | BindingFlags.NonPublic
-            );
+            KillMap();
+            HideMinimapPlugin.Obj.Config.KillMinimap = true;
+            HideMinimapPlugin.Obj.SaveConfig();
+        }
 
-            var queueObj = changedChunksField?.GetValue(null);
-            if (queueObj is not ConcurrentQueue<Vector2i> queue)
-                return;
+        public static void KillMap() => MinimapAccess.NetObject.Active = false;
 
-            var size = Eco.Shared.Voxel.World.ChunkSize.XZ;
+        [ChatSubCommand("HideMinimap", "Shows all world layers.", ChatAuthorizationLevel.Admin)]
+        public static void ShowLayers(User user) => ShowLayers();
 
-            foreach (var chunkPos in size.XYIter())
-                queue.Enqueue(chunkPos);
+        [ChatSubCommand("HideMinimap", "Hides all world layers.", ChatAuthorizationLevel.Admin)]
+        public static void HideLayers(User user) => HideLayers();
+
+        public static void ShowLayers() => SetLayersVisible(true);
+        public static void HideLayers() => SetLayersVisible(false);
+
+        static void SetLayersVisible(bool visible)
+        {
+            foreach (var layer in WorldLayerManager.Obj.Layers)
+                WorldLayerManager.Obj.UpdateLayerVisibility(layer, visible);
         }
     }
 }
