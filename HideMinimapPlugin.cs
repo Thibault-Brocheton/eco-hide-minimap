@@ -5,6 +5,8 @@ namespace CavRn.HideMinimap
     using Eco.Core.Utils;
     using Eco.Core.Utils.Threading;
     using Eco.Gameplay.Civics.Districts;
+    using Eco.Gameplay.Property;
+    using Eco.Gameplay.Settlements;
     using Eco.Shared.Localization;
     using Eco.Shared.Utils;
     using System.Collections.Generic;
@@ -23,7 +25,6 @@ namespace CavRn.HideMinimap
     public class HideMinimapConfig : Singleton<HideMinimapConfig>
     {
         public bool HideMinimap { get; set; } = false;
-        public bool KillMinimap { get; set; } = false;
 
         /// <summary>World height (0-255) of the flat fog terrain on the minimap; -1 = client default.</summary>
         public int HiddenMapHeight { get; set; } = -1;
@@ -33,6 +34,11 @@ namespace CavRn.HideMinimap
 
         /// <summary>Districts whose minimap is visible, as "MapName/DistrictName". "MapName/" reveals the whole map.</summary>
         public List<string> RevealedDistricts { get; set; } = new();
+
+        public bool TownInfluenceIsUnhidden       { get; set; } = false; //Reveals every plot influenced by a town.
+        public bool NationInfluenceIsUnhidden     { get; set; } = false; //Reveals every plot influenced by a nation.
+        public bool FederationInfluenceIsUnhidden { get; set; } = false; //Reveals every plot influenced by a federation.
+        public bool ClaimInfluenceIsUnhidden      { get; set; } = false; //Reveals every claimed plot (any deed).
     }
 
     [Priority(PriorityAttribute.Low)]
@@ -55,13 +61,15 @@ namespace CavRn.HideMinimap
         public void Initialize(TimedTask timer)
         {
             if (this.Config.HideMinimap) MinimapReveal.Activate();
-            if (this.Config.KillMinimap) HideMinimapCommands.KillMap();
 
-            //Districts grow/shrink through civics: follow them so revealed zones stay in sync without any admin action.
+            //Districts, influence and claims change through gameplay: follow them so revealed zones stay in sync without any admin action.
             DistrictMap.DistrictsUpdatedEvent.Add(_ => MinimapReveal.Refresh());
+            PropertyManager.PropertyClaimedOrUnclaimedEvent.Add((_, _, _) => MinimapReveal.RefreshIfClaimsRevealed());
+            PropertyManager.DeedDestroyedEvent.Add((_, _) => MinimapReveal.RefreshIfClaimsRevealed());
+            SettlementCommon.Initializer.RunIfOrWhenInitialized(MinimapReveal.WatchInfluenceMaps);
         }
 
         public object GetEditObject() => this.config.Config;
-        public void OnEditObjectChanged(object o, string param) { this.SaveConfig(); }
+        public void OnEditObjectChanged(object o, string param) { this.SaveConfig(); MinimapReveal.Refresh(); }
     }
 }

@@ -1,11 +1,14 @@
 namespace CavRn.HideMinimap
 {
+    using Eco.Core.Controller;
     using Eco.Core.Plugins.Interfaces;
     using Eco.Core.Systems;
     using Eco.Core.Utils;
     using Eco.Gameplay.Civics.Districts;
+    using Eco.Gameplay.InfluenceObjects;
     using Eco.Gameplay.LegislationSystem;
     using Eco.Gameplay.Minimap;
+    using Eco.Gameplay.Property;
     using Eco.Shared.Items;
     using Eco.Shared.Math;
     using Eco.Shared.Voxel;
@@ -16,7 +19,7 @@ namespace CavRn.HideMinimap
     using System;
     using VoxelWorld = Eco.Shared.Voxel.World;
 
-    /// <summary>Keeps the minimap hidden everywhere except in the configured districts, via the display-only reveal mask
+    /// <summary>Keeps the minimap hidden everywhere except in the configured districts (plus settlement influence and claims when enabled), via the display-only reveal mask
     /// (MinimapManager.SetRevealMask): the real chunk data keeps flowing so far terrain is unaffected. Icons are only shown inside revealed chunks.</summary>
     public static class MinimapReveal
     {
@@ -27,6 +30,10 @@ namespace CavRn.HideMinimap
         static HashSet<Vector2i> revealedChunks = new();
 
         static HideMinimapConfig Config => HideMinimapPlugin.Obj.Config;
+
+        //Controller subscriptions are weak and need an instance target: keep one alive for the influence maps.
+        static readonly InfluenceWatcher influenceWatcher = new();
+        sealed class InfluenceWatcher { public void OnInfluenceChanged() => Refresh(); }
 
         public static bool IsActive           { get; private set; }
         public static int  RevealedChunkCount => revealedChunks.Count;
@@ -70,21 +77,42 @@ namespace CavRn.HideMinimap
 
         public static bool IsChunkRevealed(Vector2i chunkPos) => !IsActive || revealedChunks.Contains(chunkPos);
 
-        /// <summary>A chunk is revealed when any of its 2x2 plots belongs to a revealed district of an active map.</summary>
+        /// <summary>Settlement influence maps whose plots are revealed, by tier (0 = town, 1 = nation, 2 = federation).</summary>
+        static IEnumerable<InfluenceMap> RevealedInfluenceMaps()
+        {
+            var flags = new[] { Config.TownInfluenceIsUnhidden, Config.NationInfluenceIsUnhidden, Config.FederationInfluenceIsUnhidden };
+            return SettlementType.All.Where(type => (int)type < flags.Length && flags[(int)type]).Select(type => InfluenceManager.Obj.GetMap(type)).Where(map => map?.Map != null);
+        }
+
+        /// <summary>Follows every settlement influence map so influence growth/shrink updates the revealed area.</summary>
+        public static void WatchInfluenceMaps()
+        {
+            foreach (var map in SettlementType.All.Select(type => InfluenceManager.Obj.GetMap(type)).Where(map => map != null))
+                map.Subscribe(nameof(InfluenceMap.Map), influenceWatcher.OnInfluenceChanged);
+            Refresh();
+        }
+
+        public static void RefreshIfClaimsRevealed() { if (Config.ClaimInfluenceIsUnhidden) Refresh(); }
+
+        /// <summary>A chunk is revealed when any of its 2x2 plots belongs to a revealed district of an active map, a revealed settlement influence or a claim (when enabled).</summary>
         static HashSet<Vector2i> ComputeRevealedChunks()
         {
-            var result = new HashSet<Vector2i>();
-            var keys   = new HashSet<string>(Config.RevealedDistricts.Select(k => k.Trim()), StringComparer.OrdinalIgnoreCase);
-            if (keys.Count == 0) return result;
+            var result     = new HashSet<Vector2i>();
+            var keys       = new HashSet<string>(Config.RevealedDistricts.Select(k => k.Trim()), StringComparer.OrdinalIgnoreCase);
+            var influences = RevealedInfluenceMaps().ToList();
+            var claims     = Config.ClaimInfluenceIsUnhidden;
+            if (keys.Count == 0 && influences.Count == 0 && !claims) return result;
 
-            var maps = ActiveMaps.ToList();
+            var maps = keys.Count > 0 ? ActiveMaps.ToList() : new List<DistrictMap>();
             foreach (var chunkPos in VoxelWorld.ChunkSize.XZ.XYIter())
             {
                 var origin = chunkPos * Chunk.Size;
                 foreach (var plotOffset in Vector2i.XYIter(2))
                 {
                     var plotPos = (origin + (plotOffset * PlotUtil.PlotSize)).ToPlotPos();
-                    if (maps.Any(map => IsPlotRevealed(map, plotPos, keys))) { result.Add(chunkPos); break; }
+                    if (maps.Any(map => IsPlotRevealed(map, plotPos, keys))
+                     || influences.Any(map => map.GetInfluencePlotPos(plotPos) > 0)
+                     || (claims && PropertyManager.GetDeed(plotPos) != null)) { result.Add(chunkPos); break; }
                 }
             }
             return result;

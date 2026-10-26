@@ -1,36 +1,62 @@
-# 🗺️HideMinimap Eco Mod
+# 🗺️ HideMinimap Eco Mod
 
-An Eco mod that hides the minimap except inside chosen districts, for immersive or roleplay-oriented gameplay.
+Hides the minimap for everyone, except in the areas you choose. Perfect for exploration and roleplay servers: players only see the map of the places that are "known".
 
-## Features
+## What gets hidden
 
-- **Minimap hiding** — outside revealed districts, the minimap renders as flat dark fog. Display-only: the mod sends a reveal mask (`MinimapManager.SetRevealMask`) and the client's minimap shader fogs hidden chunks, while the real chunk data keeps flowing — so **far terrain rendering is unaffected**. World layers and overlays only draw over revealed districts.
-- **District reveal** — the minimap is only rebuilt from the real world inside revealed districts (a chunk is revealed when any of its plots belongs to one). Districts are matched by *map name* and *district name* (case-insensitive), so editing a district in civics keeps everything working; the revealed area follows the district as it grows or shrinks.
-- **Icons** — player, vehicle, world object and tree icons are only shown when they stand inside a revealed district (masked client-side from the reveal mask, instant).
-- **Map Control object** — a craftable 1x2 object (Carpentry Table, Carpentry lvl 1: 20 lumber, 10 paper), listed in the Ecopedia under *Housing Objects > Cultural*. Configure `District Map Name` and `District Name` in its tab (leave the district empty to control the whole map), then press **Reveal map here / Hide map here**. The tab shows the current status of the target district; the button is disabled while the minimap is not hidden or the district cannot be found. Anyone with consumer access to the object can use it.
+Outside revealed areas, the minimap shows a flat fog instead of the terrain. This also applies to:
+- player, vehicle, object and tree icons,
+- the web server map,
+- in-game world map objects.
 
-Everything is global: a revealed district is revealed for every player.
+The world itself is unaffected: players still see far terrain normally when walking around.
 
-The mask also covers the **web server map** (terrain, heightmap, preview and layer images regenerate fogged via `WorldLayerHistory.MapRevealedTest`) and the **in-world map objects** (framed world maps render fog on hidden chunks). Note: the web map's history timeline keeps frames recorded before hiding was enabled.
+## Revealing areas
 
-## Commands (Admin-only)
+You can reveal the map in several ways, and they combine:
+
+- **Districts**: reveal a district (or a whole district map) with a command or a **Map Control** object. The revealed area follows the district when it's edited in civics.
+- **Settlements**: reveal everything under the influence of towns, nations and/or federations.
+- **Claims**: reveal every claimed plot.
+
+Revealed areas are the same for every player, and update live as districts, influence and claims change.
+
+### Map Control object
+
+A craftable object (Carpentry Table, Carpentry level 1: 20 lumber, 10 paper). In its tab, enter the district map name and the district name (leave the district empty for the whole map), then press **Reveal map here** / **Hide map here**. Anyone with access to the object can use it.
+
+## Commands (admin)
 
 | Command | Effect |
 | --- | --- |
-| `/HideMinimap Hide [fogHeight],[fogColor]` | Enables hiding; optional fog height (0-255, -1 = default) and RRGGBB fog color (`/HideMinimap Hide 71,1a3350`). Keep the fog height in ~40-180: 255 lets the zoom camera clip through it, very low values show edge artifacts. |
-| `/HideMinimap Restore` | Restores the vanilla minimap (also re-enables it after `KillMap`). |
-| `/HideMinimap RevealDistrict <map>,[district]` | Reveals a district (or a whole map). |
+| `/HideMinimap Hide [fogHeight],[fogColor]` | Hides the minimap. Optional fog height (0-255, around 40-180 looks best) and color as RRGGBB, e.g. `/HideMinimap Hide 71,1a3350`. |
+| `/HideMinimap Restore` | Shows the normal minimap again. |
+| `/HideMinimap RevealDistrict <map>,[district]` | Reveals a district, or a whole map. |
 | `/HideMinimap ConcealDistrict <map>,[district]` | Hides it again. |
-| `/HideMinimap ListDistricts` | Shows whether hiding is active, the revealed districts and the active district maps. |
-| `/HideMinimap KillMap` | Disables the minimap network object entirely. |
-| `/HideMinimap ShowLayers` / `HideLayers` | Toggles all world layers. |
+| `/HideMinimap ToggleTownInfluence` | Reveals or hides areas under town influence. |
+| `/HideMinimap ToggleNationInfluence` | Reveals or hides areas under nation influence. |
+| `/HideMinimap ToggleFederationInfluence` | Reveals or hides areas under federation influence. |
+| `/HideMinimap ToggleClaims` | Reveals or hides all claimed plots. |
+| `/HideMinimap Status` | Shows whether the minimap is hidden, the fog settings and every reveal setting. |
+| `/HideMinimap ListDistricts` | Shows the current state, revealed districts and available district maps. |
+| `/HideMinimap ShowLayers` / `HideLayers` | Shows or hides all world layers. |
 
-Settings persist in `Configs/HideMinimap.eco` (`HideMinimap`, `KillMinimap`, `RevealedDistricts` as `"Map/District"`, `HiddenMapHeight`, `HiddenMapColor`), so they survive a server restart. They can also be edited from the server UI (*Mods* category), where the plugin status shows whether the minimap is hidden and how many chunks are revealed. No client reconnect required.
+## Configuration
 
-## Requirements
+Settings are saved in `Configs/HideMinimap.eco` and can be edited from the server UI (*Mods* category). Changes apply immediately.
 
-Eco **14.1.1 or newer** on both server and client: the reveal mask (`MinimapManager.SetRevealMask`, `WorldLayerHistory.MapRevealedTest`) and the client-side fog shader shipped with that version.
+| Setting | Description |
+| --- | --- |
+| `HideMinimap` | Whether the minimap is hidden. |
+| `HiddenMapHeight` / `HiddenMapColor` | Fog height and color (-1 / empty = default). |
+| `RevealedDistricts` | Revealed districts, as `"Map/District"` (`"Map/"` for a whole map). |
+| `TownInfluenceIsUnhidden` | Reveal areas under town influence. |
+| `NationInfluenceIsUnhidden` | Reveal areas under nation influence. |
+| `FederationInfluenceIsUnhidden` | Reveal areas under federation influence. |
+| `ClaimInfluenceIsUnhidden` | Reveal all claimed plots. |
 
 ## Installation
 
-Drop the mod folder into **Mods/UserCode/**; the server compiles the sources at startup, so no build step is needed (`HideMinimap.csproj` is only there for IDE support and expects the Eco server projects two levels up). The `MapControlObject` has no dedicated client prefab: without a mod bundle providing one, the client shows the default placeholder object (the UI tab and button still work).
+Requires Eco **14.1.1 or newer**.
+
+Drop the mod folder into `Mods/UserCode/` and restart the server. The Map Control object has no custom model, so it shows as a placeholder in game (it works normally).
