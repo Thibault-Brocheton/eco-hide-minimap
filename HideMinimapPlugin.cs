@@ -40,6 +40,12 @@ namespace CavRn.HideMinimap
         public bool FederationInfluenceIsUnhidden { get; set; } = false; //Reveals every plot influenced by a federation.
         public bool ClaimInfluenceIsUnhidden      { get; set; } = false; //Reveals every claimed plot (any deed).
 
+        /// <summary>World layer revealing plots where its value reaches RevealLayerMinValue (e.g. "PlayerTrampled", "PlayerActivity"); empty = off.</summary>
+        public string RevealLayerName { get; set; } = "";
+
+        public float RevealLayerMinValue   { get; set; } = 0.5f; //Minimum layer value at a plot center to reveal it.
+        public bool  RevealLayerIsPermanent { get; set; } = true; //Discovered plots stay revealed after the layer decays (fog of war); false = only plots currently above the minimum.
+
         /// <summary>Each player always sees their own icon, even under fog; other players still only see it inside revealed zones.</summary>
         public bool AlwaysShowSelf { get; set; } = false;
     }
@@ -70,9 +76,10 @@ namespace CavRn.HideMinimap
             PropertyManager.PropertyClaimedOrUnclaimedEvent.Add((_, _, _) => MinimapReveal.RefreshIfClaimsRevealed());
             PropertyManager.DeedDestroyedEvent.Add((_, _) => MinimapReveal.RefreshIfClaimsRevealed());
             SettlementCommon.Initializer.RunIfOrWhenInitialized(MinimapReveal.WatchInfluenceMaps);
+            LayerDiscovery.Initialize();
         }
 
         public object GetEditObject() => this.config.Config;
-        public void OnEditObjectChanged(object o, string param) { this.SaveConfig(); MinimapReveal.Refresh(); }
+        public void OnEditObjectChanged(object o, string param) { this.SaveConfig(); LayerDiscovery.Update(); MinimapReveal.Refresh(); }
     }
 }

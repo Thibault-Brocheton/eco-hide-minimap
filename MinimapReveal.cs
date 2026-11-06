@@ -17,9 +17,8 @@ namespace CavRn.HideMinimap
     using System.Linq;
     using System.Numerics;
     using System;
-    using VoxelWorld = Eco.Shared.Voxel.World;
 
-    /// <summary>Keeps the minimap hidden everywhere except in the configured districts (plus settlement influence and claims when enabled), via the display-only reveal mask
+    /// <summary>Keeps the minimap hidden everywhere except in the configured districts (plus settlement influence, claims and layer discovery when enabled), via the display-only reveal mask
     /// (MinimapManager.SetRevealMask): the real chunk data keeps flowing so far terrain is unaffected. Revealed areas follow plot boundaries and icons are only shown inside them.</summary>
     public static class MinimapReveal
     {
@@ -69,8 +68,6 @@ namespace CavRn.HideMinimap
             RevealedDistrictsChangedEvent.Invoke();
         }
 
-        static Vector2i PlotDims => VoxelWorld.VoxelSize.XZ / PlotUtil.PlotSize;
-
         /// <summary>True when the plot column (world XZ / plot size) is revealed, or when the minimap isn't hidden.</summary>
         public static bool IsPlotRevealed(Vector2i plotXZ) => !IsActive || revealedPlots.Contains(plotXZ);
 
@@ -91,20 +88,22 @@ namespace CavRn.HideMinimap
 
         public static void RefreshIfClaimsRevealed() { if (Config.ClaimInfluenceIsUnhidden) Refresh(); }
 
-        /// <summary>A plot is revealed when it belongs to a revealed district of an active map, a revealed settlement influence or a claim (when enabled).</summary>
+        /// <summary>A plot is revealed when it belongs to a revealed district of an active map, a revealed settlement influence, a claim or was discovered through the reveal layer (when enabled).</summary>
         static HashSet<Vector2i> ComputeRevealedPlots()
         {
             var result     = new HashSet<Vector2i>();
             var keys       = new HashSet<string>(Config.RevealedDistricts.Select(k => k.Trim()), StringComparer.OrdinalIgnoreCase);
             var influences = RevealedInfluenceMaps().ToList();
             var claims     = Config.ClaimInfluenceIsUnhidden;
-            if (keys.Count == 0 && influences.Count == 0 && !claims) return result;
+            var discovered = LayerDiscovery.Layer != null && LayerDiscovery.DiscoveredPlotCount > 0;
+            if (keys.Count == 0 && influences.Count == 0 && !claims && !discovered) return result;
 
             var maps = keys.Count > 0 ? ActiveMaps.ToList() : new List<DistrictMap>();
-            foreach (var plotXZ in PlotDims.XYIter())
+            foreach (var plotXZ in PlotMask.PlotDims.XYIter())
             {
                 var plotPos = (plotXZ * PlotUtil.PlotSize).ToPlotPos();
-                if (maps.Any(map => IsDistrictPlotRevealed(map, plotPos, keys))
+                if ((discovered && LayerDiscovery.IsPlotDiscovered(plotXZ))
+                 || maps.Any(map => IsDistrictPlotRevealed(map, plotPos, keys))
                  || influences.Any(map => map.GetInfluencePlotPos(plotPos) > 0)
                  || (claims && PropertyManager.GetDeed(plotPos) != null)) result.Add(plotXZ);
             }
@@ -115,19 +114,6 @@ namespace CavRn.HideMinimap
         {
             var district = map.GetDistrictAtPlotPos(plotPos);
             return district != null && (keys.Contains(Key(map, district)) || keys.Contains(Key(map.Name, string.Empty)));
-        }
-
-        /// <summary>Packs the revealed plot set into the bitmask format of MinimapManager.SetRevealMask (bit index = x + y * plotDims.x, LSB first).</summary>
-        static byte[] BuildMask(HashSet<Vector2i> plots)
-        {
-            var dims = PlotDims;
-            var mask = new byte[((dims.x * dims.y) + 7) / 8];
-            foreach (var plotXZ in plots)
-            {
-                var index = plotXZ.x + (plotXZ.y * dims.x);
-                mask[index / 8] |= (byte)(1 << (index % 8));
-            }
-            return mask;
         }
 
         /// <summary>Hides the minimap except in the revealed districts. Safe to call again to re-apply.</summary>
@@ -168,7 +154,7 @@ namespace CavRn.HideMinimap
         static void PushMask()
         {
             var color = int.TryParse(Config.HiddenMapColor?.Trim().TrimStart('#'), System.Globalization.NumberStyles.HexNumber, null, out var rgb) ? rgb : -1;
-            MinimapManager.SetRevealMask(IsActive ? BuildMask(revealedPlots) : null, Config.HiddenMapHeight, color, Config.AlwaysShowSelf);
+            MinimapManager.SetRevealMask(IsActive ? PlotMask.Pack(revealedPlots) : null, Config.HiddenMapHeight, color, Config.AlwaysShowSelf);
             WorldLayerHistory.MapRevealedTest = IsActive ? worldPos => IsPlotRevealed(worldPos / PlotUtil.PlotSize) : null;
             WorldLayerHistory.RefreshMapImages();
         }

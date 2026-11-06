@@ -18,6 +18,7 @@ You can reveal the map in several ways, and they combine:
 - **Districts**: reveal a district (or a whole district map) with a command or a **Map Control** object. The revealed area follows the district when it's edited in civics.
 - **Settlements**: reveal everything under the influence of towns, nations and/or federations.
 - **Claims**: reveal every claimed plot.
+- **Player activity (fog of war)**: reveal plots where a world layer reaches a minimum value, e.g. `PlayerTrampled` (where players walk) or `PlayerActivity` (where players act). One player alone rarely gets there, so busy areas get revealed, like roads and town centers. By default a discovered plot stays revealed after the layer fades. Discovery only happens while the minimap is hidden, and is saved with the world.
 
 Revealed areas are the same for every player, and update live as districts, influence and claims change.
 
@@ -37,6 +38,9 @@ A craftable object (Carpentry Table, Carpentry level 1: 20 lumber, 10 paper). In
 | `/HideMinimap ToggleNationInfluence` | Reveals or hides areas under nation influence. |
 | `/HideMinimap ToggleFederationInfluence` | Reveals or hides areas under federation influence. |
 | `/HideMinimap ToggleClaims` | Reveals or hides all claimed plots. |
+| `/HideMinimap SetRevealLayer [layer],[minValue]` | Reveals plots where the layer value is at least `minValue` (default 0.5), e.g. `/HideMinimap SetRevealLayer PlayerTrampled,0.5`. No layer turns it off. An unknown name lists the available layers. |
+| `/HideMinimap ToggleLayerPermanent` | Switches between permanent discovery (fog of war) and live (only plots currently above the minimum). |
+| `/HideMinimap ResetLayerDiscovery` | Forgets every plot discovered through the layer. |
 | `/HideMinimap ToggleShowSelf` | Lets players always see their own icon under fog (others still only see them in revealed zones). |
 | `/HideMinimap Status` | Shows whether the minimap is hidden, the fog settings and every reveal setting. |
 | `/HideMinimap ListDistricts` | Shows the current state, revealed districts and available district maps. |
@@ -55,6 +59,9 @@ Settings are saved in `Configs/HideMinimap.eco` and can be edited from the serve
 | `NationInfluenceIsUnhidden` | Reveal areas under nation influence. |
 | `FederationInfluenceIsUnhidden` | Reveal areas under federation influence. |
 | `ClaimInfluenceIsUnhidden` | Reveal all claimed plots. |
+| `RevealLayerName` | World layer used for discovery (`PlayerTrampled`, `PlayerActivity`, `TrampledSpread`...). Empty = off. |
+| `RevealLayerMinValue` | Minimum layer value at a plot's center to reveal that plot. |
+| `RevealLayerIsPermanent` | Discovered plots stay revealed (`true`), or only show while above the minimum (`false`). |
 | `AlwaysShowSelf` | Each player always sees their own icon, even under fog. Other players still only see it inside revealed zones. |
 
 ## Installation

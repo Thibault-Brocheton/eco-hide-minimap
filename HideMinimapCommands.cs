@@ -72,12 +72,17 @@ namespace CavRn.HideMinimap
             sb.AppendLine($"Nation influence: {RevealLabel(config.NationInfluenceIsUnhidden)}");
             sb.AppendLine($"Federation influence: {RevealLabel(config.FederationInfluenceIsUnhidden)}");
             sb.AppendLine($"Claims: {RevealLabel(config.ClaimInfluenceIsUnhidden)}");
+            sb.AppendLine($"Layer discovery: {LayerLabel(config)}");
             sb.AppendLine($"Own icon under fog: {(config.AlwaysShowSelf ? "shown" : "hidden")}");
             sb.Append($"Revealed districts: {(config.RevealedDistricts.Any() ? string.Join(", ", config.RevealedDistricts) : "none")}");
             user.Player.MsgLocStr(sb.ToString());
         }
 
         static string RevealLabel(bool revealed) => revealed ? "revealed" : "hidden";
+
+        static string LayerLabel(HideMinimapConfig config) => string.IsNullOrWhiteSpace(config.RevealLayerName)
+            ? "off"
+            : $"{config.RevealLayerName} >= {config.RevealLayerMinValue}, {(config.RevealLayerIsPermanent ? "permanent" : "live")}, {LayerDiscovery.DiscoveredPlotCount} plots discovered{(LayerDiscovery.Layer == null ? " (unknown layer!)" : "")}";
 
         static bool TryValidate(User user, string mapName, string districtName)
         {
@@ -98,6 +103,43 @@ namespace CavRn.HideMinimap
 
         [ChatSubCommand("HideMinimap", "Toggles revealing the map on all claimed plots.", ChatAuthorizationLevel.Admin)]
         public static void ToggleClaims(User user)              => ToggleReveal(user, "Claims",               c => c.ClaimInfluenceIsUnhidden      = !c.ClaimInfluenceIsUnhidden);
+
+        [ChatSubCommand("HideMinimap", "Reveals plots where a world layer reaches a minimum value, e.g. PlayerTrampled,0.5. No layer name turns it off.", ChatAuthorizationLevel.Admin)]
+        public static void SetRevealLayer(User user, string layerName = "", float minValue = 0.5f)
+        {
+            layerName = layerName.Trim();
+            var layer = string.IsNullOrEmpty(layerName) ? null : WorldLayerManager.Obj.GetLayer(layerName);
+            if (!string.IsNullOrEmpty(layerName) && layer == null)
+            {
+                user.Player.MsgLocStr($"No world layer named '{layerName}'. Available: {string.Join(", ", WorldLayerManager.Obj.Layers.Select(l => l.Name).OrderBy(n => n))}");
+                return;
+            }
+
+            var config = HideMinimapPlugin.Obj.Config;
+            config.RevealLayerName     = layer?.Name ?? "";
+            config.RevealLayerMinValue = minValue;
+            HideMinimapPlugin.Obj.SaveConfig();
+            LayerDiscovery.Update();
+            MinimapReveal.Refresh();
+            user.Player.MsgLocStr($"Layer discovery: {LayerLabel(config)}.");
+        }
+
+        [ChatSubCommand("HideMinimap", "Toggles whether layer-discovered plots stay revealed (fog of war) or only show while the layer is above the minimum.", ChatAuthorizationLevel.Admin)]
+        public static void ToggleLayerPermanent(User user)
+        {
+            var config = HideMinimapPlugin.Obj.Config;
+            config.RevealLayerIsPermanent = !config.RevealLayerIsPermanent;
+            HideMinimapPlugin.Obj.SaveConfig();
+            LayerDiscovery.Update();
+            user.Player.MsgLocStr($"Layer discovery: {LayerLabel(config)}.");
+        }
+
+        [ChatSubCommand("HideMinimap", "Forgets every plot discovered through the reveal layer.", ChatAuthorizationLevel.Admin)]
+        public static void ResetLayerDiscovery(User user)
+        {
+            LayerDiscovery.Reset();
+            user.Player.MsgLocStr($"Layer discovery reset ({MinimapReveal.RevealedPlotCount} plots visible).");
+        }
 
         [ChatSubCommand("HideMinimap", "Toggles whether players always see their own icon, even under fog (others still only see them in revealed zones).", ChatAuthorizationLevel.Admin)]
         public static void ToggleShowSelf(User user)
