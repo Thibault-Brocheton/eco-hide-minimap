@@ -39,6 +39,9 @@ namespace CavRn.HideMinimap
         public bool NationInfluenceIsUnhidden     { get; set; } = false; //Reveals every plot influenced by a nation.
         public bool FederationInfluenceIsUnhidden { get; set; } = false; //Reveals every plot influenced by a federation.
         public bool ClaimInfluenceIsUnhidden      { get; set; } = false; //Reveals every claimed plot (any deed).
+
+        /// <summary>Each player always sees their own icon, even under fog; other players still only see it inside revealed zones.</summary>
+        public bool AlwaysShowSelf { get; set; } = false;
     }
 
     [Priority(PriorityAttribute.Low)]
@@ -55,7 +58,7 @@ namespace CavRn.HideMinimap
             this.SaveConfig();
         }
 
-        public string GetStatus()   => MinimapReveal.IsActive ? $"Hidden, {MinimapReveal.RevealedChunkCount} chunks revealed" : "Visible";
+        public string GetStatus()   => MinimapReveal.IsActive ? $"Hidden, {MinimapReveal.RevealedPlotCount} plots revealed" : "Visible";
         public string GetCategory() => Localizer.DoStr("Mods");
 
         public void Initialize(TimedTask timer)

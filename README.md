@@ -37,6 +37,7 @@ A craftable object (Carpentry Table, Carpentry level 1: 20 lumber, 10 paper). In
 | `/HideMinimap ToggleNationInfluence` | Reveals or hides areas under nation influence. |
 | `/HideMinimap ToggleFederationInfluence` | Reveals or hides areas under federation influence. |
 | `/HideMinimap ToggleClaims` | Reveals or hides all claimed plots. |
+| `/HideMinimap ToggleShowSelf` | Lets players always see their own icon under fog (others still only see them in revealed zones). |
 | `/HideMinimap Status` | Shows whether the minimap is hidden, the fog settings and every reveal setting. |
 | `/HideMinimap ListDistricts` | Shows the current state, revealed districts and available district maps. |
 | `/HideMinimap ShowLayers` / `HideLayers` | Shows or hides all world layers. |
@@ -54,6 +55,7 @@ Settings are saved in `Configs/HideMinimap.eco` and can be edited from the serve
 | `NationInfluenceIsUnhidden` | Reveal areas under nation influence. |
 | `FederationInfluenceIsUnhidden` | Reveal areas under federation influence. |
 | `ClaimInfluenceIsUnhidden` | Reveal all claimed plots. |
+| `AlwaysShowSelf` | Each player always sees their own icon, even under fog. Other players still only see it inside revealed zones. |
 
 ## Installation
 

@@ -20,14 +20,14 @@ namespace CavRn.HideMinimap
     using VoxelWorld = Eco.Shared.Voxel.World;
 
     /// <summary>Keeps the minimap hidden everywhere except in the configured districts (plus settlement influence and claims when enabled), via the display-only reveal mask
-    /// (MinimapManager.SetRevealMask): the real chunk data keeps flowing so far terrain is unaffected. Icons are only shown inside revealed chunks.</summary>
+    /// (MinimapManager.SetRevealMask): the real chunk data keeps flowing so far terrain is unaffected. Revealed areas follow plot boundaries and icons are only shown inside them.</summary>
     public static class MinimapReveal
     {
         /// <summary>Fired after the set of revealed districts changes (config edit, command or map control object).</summary>
         public static ThreadSafeAction RevealedDistrictsChangedEvent = new();
 
         static readonly object   sync = new();
-        static HashSet<Vector2i> revealedChunks = new();
+        static HashSet<Vector2i> revealedPlots = new(); //plot columns, world XZ / plot size
 
         static HideMinimapConfig Config => HideMinimapPlugin.Obj.Config;
 
@@ -35,8 +35,8 @@ namespace CavRn.HideMinimap
         static readonly InfluenceWatcher influenceWatcher = new();
         sealed class InfluenceWatcher { public void OnInfluenceChanged() => Refresh(); }
 
-        public static bool IsActive           { get; private set; }
-        public static int  RevealedChunkCount => revealedChunks.Count;
+        public static bool IsActive          { get; private set; }
+        public static int  RevealedPlotCount => revealedPlots.Count;
 
         public static string Key(string mapName, string districtName) => $"{mapName.Trim()}/{districtName.Trim()}";
         public static string Key(DistrictMap map, District district)  => Key(map.Name, district.Name);
@@ -69,13 +69,10 @@ namespace CavRn.HideMinimap
             RevealedDistrictsChangedEvent.Invoke();
         }
 
-        public static Vector2i ChunkOf(Vector3 position)
-        {
-            var wrapped = VoxelWorld.GetWrappedWorldPosition(new Vector2i((int)position.X, (int)position.Z));
-            return new Vector2i(wrapped.x / Chunk.Size, wrapped.y / Chunk.Size);
-        }
+        static Vector2i PlotDims => VoxelWorld.VoxelSize.XZ / PlotUtil.PlotSize;
 
-        public static bool IsChunkRevealed(Vector2i chunkPos) => !IsActive || revealedChunks.Contains(chunkPos);
+        /// <summary>True when the plot column (world XZ / plot size) is revealed, or when the minimap isn't hidden.</summary>
+        public static bool IsPlotRevealed(Vector2i plotXZ) => !IsActive || revealedPlots.Contains(plotXZ);
 
         /// <summary>Settlement influence maps whose plots are revealed, by tier (0 = town, 1 = nation, 2 = federation).</summary>
         static IEnumerable<InfluenceMap> RevealedInfluenceMaps()
@@ -94,8 +91,8 @@ namespace CavRn.HideMinimap
 
         public static void RefreshIfClaimsRevealed() { if (Config.ClaimInfluenceIsUnhidden) Refresh(); }
 
-        /// <summary>A chunk is revealed when any of its 2x2 plots belongs to a revealed district of an active map, a revealed settlement influence or a claim (when enabled).</summary>
-        static HashSet<Vector2i> ComputeRevealedChunks()
+        /// <summary>A plot is revealed when it belongs to a revealed district of an active map, a revealed settlement influence or a claim (when enabled).</summary>
+        static HashSet<Vector2i> ComputeRevealedPlots()
         {
             var result     = new HashSet<Vector2i>();
             var keys       = new HashSet<string>(Config.RevealedDistricts.Select(k => k.Trim()), StringComparer.OrdinalIgnoreCase);
@@ -104,34 +101,30 @@ namespace CavRn.HideMinimap
             if (keys.Count == 0 && influences.Count == 0 && !claims) return result;
 
             var maps = keys.Count > 0 ? ActiveMaps.ToList() : new List<DistrictMap>();
-            foreach (var chunkPos in VoxelWorld.ChunkSize.XZ.XYIter())
+            foreach (var plotXZ in PlotDims.XYIter())
             {
-                var origin = chunkPos * Chunk.Size;
-                foreach (var plotOffset in Vector2i.XYIter(2))
-                {
-                    var plotPos = (origin + (plotOffset * PlotUtil.PlotSize)).ToPlotPos();
-                    if (maps.Any(map => IsPlotRevealed(map, plotPos, keys))
-                     || influences.Any(map => map.GetInfluencePlotPos(plotPos) > 0)
-                     || (claims && PropertyManager.GetDeed(plotPos) != null)) { result.Add(chunkPos); break; }
-                }
+                var plotPos = (plotXZ * PlotUtil.PlotSize).ToPlotPos();
+                if (maps.Any(map => IsDistrictPlotRevealed(map, plotPos, keys))
+                 || influences.Any(map => map.GetInfluencePlotPos(plotPos) > 0)
+                 || (claims && PropertyManager.GetDeed(plotPos) != null)) result.Add(plotXZ);
             }
             return result;
         }
 
-        static bool IsPlotRevealed(DistrictMap map, PlotPos plotPos, HashSet<string> keys)
+        static bool IsDistrictPlotRevealed(DistrictMap map, PlotPos plotPos, HashSet<string> keys)
         {
             var district = map.GetDistrictAtPlotPos(plotPos);
             return district != null && (keys.Contains(Key(map, district)) || keys.Contains(Key(map.Name, string.Empty)));
         }
 
-        /// <summary>Packs the revealed chunk set into the bitmask format of MinimapManager.SetRevealMask (bit index = x + y * chunkDims.x, LSB first).</summary>
-        static byte[] BuildMask(HashSet<Vector2i> chunks)
+        /// <summary>Packs the revealed plot set into the bitmask format of MinimapManager.SetRevealMask (bit index = x + y * plotDims.x, LSB first).</summary>
+        static byte[] BuildMask(HashSet<Vector2i> plots)
         {
-            var dims = VoxelWorld.ChunkSize.XZ;
+            var dims = PlotDims;
             var mask = new byte[((dims.x * dims.y) + 7) / 8];
-            foreach (var chunkPos in chunks)
+            foreach (var plotXZ in plots)
             {
-                var index = chunkPos.x + (chunkPos.y * dims.x);
+                var index = plotXZ.x + (plotXZ.y * dims.x);
                 mask[index / 8] |= (byte)(1 << (index % 8));
             }
             return mask;
@@ -142,8 +135,8 @@ namespace CavRn.HideMinimap
         {
             lock (sync)
             {
-                IsActive       = true;
-                revealedChunks = ComputeRevealedChunks();
+                IsActive      = true;
+                revealedPlots = ComputeRevealedPlots();
                 PushMask();
             }
         }
@@ -154,19 +147,19 @@ namespace CavRn.HideMinimap
             lock (sync)
             {
                 if (!IsActive) return;
-                IsActive       = false;
-                revealedChunks = new HashSet<Vector2i>();
+                IsActive      = false;
+                revealedPlots = new HashSet<Vector2i>();
                 PushMask();
             }
         }
 
-        /// <summary>Recomputes the revealed chunks and pushes the new mask, called when districts or the revealed set change.</summary>
+        /// <summary>Recomputes the revealed plots and pushes the new mask, called when districts or the revealed set change.</summary>
         public static void Refresh()
         {
             if (!IsActive) return;
             lock (sync)
             {
-                revealedChunks = ComputeRevealedChunks();
+                revealedPlots = ComputeRevealedPlots();
                 PushMask();
             }
         }
@@ -175,8 +168,8 @@ namespace CavRn.HideMinimap
         static void PushMask()
         {
             var color = int.TryParse(Config.HiddenMapColor?.Trim().TrimStart('#'), System.Globalization.NumberStyles.HexNumber, null, out var rgb) ? rgb : -1;
-            MinimapManager.SetRevealMask(IsActive ? BuildMask(revealedChunks) : null, Config.HiddenMapHeight, color);
-            WorldLayerHistory.MapRevealedTest = IsActive ? worldPos => IsChunkRevealed(new Vector2i(worldPos.x / Chunk.Size, worldPos.y / Chunk.Size)) : null;
+            MinimapManager.SetRevealMask(IsActive ? BuildMask(revealedPlots) : null, Config.HiddenMapHeight, color, Config.AlwaysShowSelf);
+            WorldLayerHistory.MapRevealedTest = IsActive ? worldPos => IsPlotRevealed(worldPos / PlotUtil.PlotSize) : null;
             WorldLayerHistory.RefreshMapImages();
         }
     }

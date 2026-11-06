@@ -24,7 +24,7 @@ namespace CavRn.HideMinimap
             config.HiddenMapColor  = fogColor.Trim();
             HideMinimapPlugin.Obj.SaveConfig();
             MinimapReveal.Activate();
-            user.Player.MsgLocStr($"Minimap hidden, {MinimapReveal.RevealedChunkCount} chunks revealed.");
+            user.Player.MsgLocStr($"Minimap hidden, {MinimapReveal.RevealedPlotCount} plots revealed.");
         }
 
         [ChatSubCommand("HideMinimap", "Restores the vanilla minimap everywhere.", ChatAuthorizationLevel.Admin)]
@@ -43,14 +43,14 @@ namespace CavRn.HideMinimap
         {
             if (!TryValidate(user, mapName, districtName)) return;
             MinimapReveal.SetDistrictRevealed(mapName, districtName, true);
-            user.Player.MsgLocStr($"Revealed {MinimapReveal.Key(mapName, districtName)} ({MinimapReveal.RevealedChunkCount} chunks visible).");
+            user.Player.MsgLocStr($"Revealed {MinimapReveal.Key(mapName, districtName)} ({MinimapReveal.RevealedPlotCount} plots visible).");
         }
 
         [ChatSubCommand("HideMinimap", "Hides the minimap again inside a district: map name, then district name (empty = whole map).", ChatAuthorizationLevel.Admin)]
         public static void ConcealDistrict(User user, string mapName, string districtName = "")
         {
             MinimapReveal.SetDistrictRevealed(mapName, districtName, false);
-            user.Player.MsgLocStr($"Concealed {MinimapReveal.Key(mapName, districtName)} ({MinimapReveal.RevealedChunkCount} chunks visible).");
+            user.Player.MsgLocStr($"Concealed {MinimapReveal.Key(mapName, districtName)} ({MinimapReveal.RevealedPlotCount} plots visible).");
         }
 
         [ChatSubCommand("HideMinimap", "Lists revealed districts and active district maps.", ChatAuthorizationLevel.Admin)]
@@ -66,12 +66,13 @@ namespace CavRn.HideMinimap
         {
             var config = HideMinimapPlugin.Obj.Config;
             var sb     = new StringBuilder();
-            sb.AppendLine($"Minimap: {(MinimapReveal.IsActive ? $"hidden, {MinimapReveal.RevealedChunkCount} chunks revealed" : "visible")}");
+            sb.AppendLine($"Minimap: {(MinimapReveal.IsActive ? $"hidden, {MinimapReveal.RevealedPlotCount} plots revealed" : "visible")}");
             sb.AppendLine($"Fog: height {(config.HiddenMapHeight < 0 ? "default" : config.HiddenMapHeight)}, color {(string.IsNullOrWhiteSpace(config.HiddenMapColor) ? "default" : config.HiddenMapColor)}");
             sb.AppendLine($"Town influence: {RevealLabel(config.TownInfluenceIsUnhidden)}");
             sb.AppendLine($"Nation influence: {RevealLabel(config.NationInfluenceIsUnhidden)}");
             sb.AppendLine($"Federation influence: {RevealLabel(config.FederationInfluenceIsUnhidden)}");
             sb.AppendLine($"Claims: {RevealLabel(config.ClaimInfluenceIsUnhidden)}");
+            sb.AppendLine($"Own icon under fog: {(config.AlwaysShowSelf ? "shown" : "hidden")}");
             sb.Append($"Revealed districts: {(config.RevealedDistricts.Any() ? string.Join(", ", config.RevealedDistricts) : "none")}");
             user.Player.MsgLocStr(sb.ToString());
         }
@@ -98,13 +99,23 @@ namespace CavRn.HideMinimap
         [ChatSubCommand("HideMinimap", "Toggles revealing the map on all claimed plots.", ChatAuthorizationLevel.Admin)]
         public static void ToggleClaims(User user)              => ToggleReveal(user, "Claims",               c => c.ClaimInfluenceIsUnhidden      = !c.ClaimInfluenceIsUnhidden);
 
+        [ChatSubCommand("HideMinimap", "Toggles whether players always see their own icon, even under fog (others still only see them in revealed zones).", ChatAuthorizationLevel.Admin)]
+        public static void ToggleShowSelf(User user)
+        {
+            var config = HideMinimapPlugin.Obj.Config;
+            config.AlwaysShowSelf = !config.AlwaysShowSelf;
+            HideMinimapPlugin.Obj.SaveConfig();
+            MinimapReveal.Refresh();
+            user.Player.MsgLocStr($"Own icon under fog: {(config.AlwaysShowSelf ? "shown" : "hidden")}.");
+        }
+
         /// <summary>Flips a reveal setting (the toggle returns its new value), persists it and applies it immediately.</summary>
         static void ToggleReveal(User user, string label, Func<HideMinimapConfig, bool> toggle)
         {
             var revealed = toggle(HideMinimapPlugin.Obj.Config);
             HideMinimapPlugin.Obj.SaveConfig();
             MinimapReveal.Refresh();
-            user.Player.MsgLocStr($"{label}: map {(revealed ? "revealed" : "hidden")} ({MinimapReveal.RevealedChunkCount} chunks visible).");
+            user.Player.MsgLocStr($"{label}: map {(revealed ? "revealed" : "hidden")} ({MinimapReveal.RevealedPlotCount} plots visible).");
         }
 
         [ChatSubCommand("HideMinimap", "Shows all world layers.", ChatAuthorizationLevel.Admin)]
